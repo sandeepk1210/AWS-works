@@ -1,0 +1,96 @@
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: ami-0323c3dd2da7fb37d
+    ap-southeast-2:
+      AMI: ami-0323c3dd2da7fb37d
+Parameters:
+  KeyName:
+    Description: "Name of an existing EC2 KeyPair to enable SSH access into the server"
+    Type: AWS::EC2::KeyPair::KeyName
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - m1.small
+      - m1.large
+    Description:
+      "EC2 instance type"
+  Environment:
+    Description: "Environment in which AWS Stack to be created:"
+    Type: String
+    Default: SIT
+    AllowedValues:
+      - SIT
+      - SIT2
+      - STG
+      - PREPROD
+      - PROD
+Resources:
+  Ec2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: #t2.micro
+        Ref:
+          InstanceType
+      ImageId:
+        Fn::FindInMap:
+          - RegionMap
+          - !Ref AWS::Region
+          - AMI
+      KeyName: !Ref KeyName
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install httpd -y
+          yum install awslogs -y
+
+          service httpd start
+          chkconfig httpd on
+
+          sed -i '/region/c\region = us-east-1' /etc/awslogs/awscli.conf
+          sed -i '/^log_group_name/c\log_group_name = EC2_VAR_LOGS_MESSAGES' /etc/awslogs/awslogs.conf
+
+          service awslogsd start
+          systemctl  enable awslogsd
+
+          cd /var/www/html
+          echo "<html><h1>This is WebServer 01</h1></html>" > index.html
+      Tags:
+        - Key: "Name"
+          #Value: "WebServer"
+          #Value: !Join [" ", [WebServer !Ref Environment]]
+          Value: !Join
+            - ""
+            - - "Webserver "
+              - !Ref Environment
+        - Key: "Region"
+          Value: !Ref AWS::Region
+        - Key: "Environment"
+          Value: !Ref Environment
+          #Value:
+          #  Ref:
+          #    Environment
+      SecurityGroups:
+        - !Ref SecurityGroupSSHandHTTPAccess
+  SecurityGroupSSHandHTTPAccess:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable SSH and HTTP access
+      GroupName: HTTP and SSH access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+Outputs:
+  ServerDns:
+    Value: !GetAtt
+      - Ec2Instance
+      - PublicDnsName
